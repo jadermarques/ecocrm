@@ -1,0 +1,33 @@
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    build-essential \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install python dependencies
+COPY streamlit_portal/requirements.txt /app/requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Copy shared code
+COPY shared /app/shared
+
+# Copy service code
+COPY streamlit_portal /app/streamlit_portal
+
+# Set python path
+ENV PYTHONPATH=/app
+
+WORKDIR /app/streamlit_portal
+
+# Expose port
+EXPOSE 8501
+
+# Healthcheck
+HEALTHCHECK CMD curl --fail http://localhost:8501/_stcore/health || exit 1
+
+# Run command
+CMD ["streamlit", "run", "app.py", "--server.port=8501", "--server.address=0.0.0.0"]

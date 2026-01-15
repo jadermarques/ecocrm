@@ -1,0 +1,94 @@
+services:
+  postgres:
+    image: postgres:15-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    ports:
+      - "${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+    command: redis-server --appendonly yes
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  platform_api:
+    build:
+      context: .
+      dockerfile: Dockerfile.platform_api
+    platform: linux/amd64
+    env_file: .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+    ports:
+      - "${API_PORT:-8000}:8000"
+    volumes:
+      - ./var:/app/data
+      - ./platform_api:/app/platform_api # Bind mount
+      - ./shared:/app/shared
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  streamlit_portal:
+    build:
+      context: .
+      dockerfile: Dockerfile.streamlit_portal
+    platform: linux/amd64
+    env_file: .env
+    environment:
+      - PLATFORM_API_BASE_URL=${PLATFORM_API_BASE_URL}
+    ports:
+      - "${STREAMLIT_PORT:-8501}:8501"
+    volumes:
+      - ./var:/app/data
+      - ./streamlit_portal:/app/streamlit_portal
+      - ./shared:/app/shared
+    depends_on:
+      - platform_api
+
+  bot_runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.bot_runner
+    platform: linux/amd64
+    env_file: .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=${REDIS_URL}
+      - REDIS_STREAM_NAME=${REDIS_STREAM_NAME}
+      - REDIS_CONSUMER_GROUP=${REDIS_CONSUMER_GROUP}
+      - REDIS_CONSUMER_NAME=${REDIS_CONSUMER_NAME}
+    volumes:
+      - ./bot_runner:/app/bot_runner
+      - ./shared:/app/shared
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:

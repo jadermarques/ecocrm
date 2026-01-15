@@ -1,0 +1,9 @@
+redis
+asyncpg
+sqlalchemy
+pydantic
+pydantic-settings
+requests
+tenacity
+crewai==0.35.0
+langchain-openai
