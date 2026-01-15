@@ -19,7 +19,7 @@ with tab1:
 with tab2:
     st.header("Users Management")
     if st.button("Refresh Users"):
-        users = client.get_users()
+        users = client.list_users()
         if users:
             df = pd.DataFrame(users)
             st.dataframe(df[["id", "email", "full_name", "role", "is_active", "is_superuser"]])
@@ -112,10 +112,9 @@ with tab_models:
         # Simple deletion UI below logic
         st.divider()
         del_id = st.number_input("Enter Model ID to Delete", min_value=0)
-        if st.button("Delete Model"):
-             if client.delete_ai_model(del_id):
-                 st.success("Deleted!")
-                 st.rerun()
+        if st.button("Delete Model") and client.delete_ai_model(del_id):
+             st.success("Deleted!")
+             st.rerun()
 
 with tab3:
     st.header("System Logs")
