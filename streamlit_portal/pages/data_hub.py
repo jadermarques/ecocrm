@@ -17,7 +17,7 @@ with st.sidebar:
         max_value=date.today()
     )
     # Ideally fetch inboxes to select, for now simple text input or optional
-    inbox_id = st.number_input("Inbox ID (Optional)", min_value=1, value=0, step=1)
+    inbox_id = st.number_input("Inbox ID (Optional)", min_value=0, value=0, step=1)
     inbox_id = None if inbox_id == 0 else inbox_id
 
 if len(d_range) == 2:

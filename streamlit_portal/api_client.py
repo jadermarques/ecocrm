@@ -15,6 +15,28 @@ class APIClient:
         except ValueError:
             return response.text
 
+    # --- System / Admin ---
+    def get_health(self):
+        try:
+            resp = requests.get(f"{self.base_url}/health")
+            if resp.status_code == 200:
+                return True, resp.json()
+            return False, f"Status: {resp.status_code}"
+        except Exception as e:
+            return False, str(e)
+
+    def get_config(self):
+        resp = requests.get(f"{self.api_v1}/admin/config")
+        return self._handle_response(resp) if resp.status_code == 200 else {}
+
+    def get_logs(self):
+        resp = requests.get(f"{self.api_v1}/admin/logs")
+        return self._handle_response(resp) if resp.status_code == 200 else {"logs": []}
+
+    def list_users(self):
+        resp = requests.get(f"{self.api_v1}/admin/users")
+        return self._handle_response(resp) if resp.status_code == 200 else []
+
     # --- Bot Studio ---
     # Agents
     def list_agents(self):
@@ -153,8 +175,11 @@ class APIClient:
         resp = requests.post(f"{self.api_v1}/testlab/runs/{run_id}/messages", json=payload)
         return self._handle_response(resp)
 
+    def get_run(self, run_id):
+        resp = requests.get(f"{self.api_v1}/testlab/runs/{run_id}")
+        return self._handle_response(resp) if resp.status_code == 200 else None
+
     def link_tasks_to_crew(self, crew_id, links):
-        # links = [{"task_id": 1, "step_order": 1}, ...]
         resp = requests.post(f"{self.api_v1}/botstudio/crews/{crew_id}/tasks", json=links)
         return self._handle_response(resp)
 
