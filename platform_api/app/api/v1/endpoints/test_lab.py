@@ -3,26 +3,44 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
+from datetime import datetime
+import asyncio
 
 from app.db.session import get_db
-from app.models.test_lab import TestRun, TestRunEvent
+from app.models.bot_run import BotRun, BotRunEvent
+from app.models.bot_studio import BotCrewVersion
 from app.schemas.test_lab import TestRunCreate, TestRun as TestRunSchema, TestRunEvent as TestRunEventSchema, MessageCreate
+from app.core.config import settings
 
 router = APIRouter()
+
+# Helper (Should be shared but implemented here for speed/MVP as per strict separation usually desired)
+async def _execute_crew_local(snapshot: dict, inputs: dict) -> str:
+    # Stub execution
+    await asyncio.sleep(1)
+    return f"Test Lab Reply: Filtered '{inputs.get('content')}' via {snapshot.get('crew', {}).get('name')}"
 
 @router.post("/runs", response_model=TestRunSchema)
 async def create_test_run(
     run_in: TestRunCreate,
     db: AsyncSession = Depends(get_db)
 ) -> Any:
-    """Create a new test run for the Test Lab."""
+    """Create a new manual run context."""
     # Check if exists
-    result = await db.execute(select(TestRun).where(TestRun.id == run_in.id))
+    result = await db.execute(select(BotRun).where(BotRun.id == run_in.id))
     existing = result.scalars().first()
     if existing:
         return existing
         
-    db_obj = TestRun(id=run_in.id, name=run_in.name, persona=run_in.persona)
+    db_obj = BotRun(
+        id=run_in.id, 
+        source="manual", 
+        status="running"
+        # crew_version_id intentionally left null initially or set if provided
+    )
+    if run_in.crew_version_id:
+        db_obj.crew_version_id = run_in.crew_version_id
+        
     db.add(db_obj)
     await db.commit()
     await db.refresh(db_obj)
@@ -33,9 +51,9 @@ async def get_test_run(
     run_id: str,
     db: AsyncSession = Depends(get_db)
 ) -> Any:
-    """Get a specific test run by ID."""
+    """Get a specific run."""
     result = await db.execute(
-        select(TestRun).where(TestRun.id == run_id).options(selectinload(TestRun.events))
+        select(BotRun).where(BotRun.id == run_id).options(selectinload(BotRun.events))
     )
     run = result.scalars().first()
     if not run:
@@ -48,37 +66,132 @@ async def add_message(
     msg_in: MessageCreate,
     db: AsyncSession = Depends(get_db)
 ) -> Any:
-    """Add a message to the test run (User or System)."""
-    # Verify run exists
-    result = await db.execute(select(TestRun).where(TestRun.id == run_id))
+    """
+    Submits a message to the run.
+    This triggers the pipeline execution synchronously for the Test Lab MVP.
+    """
+    # 1. Get Run
+    result = await db.execute(select(BotRun).where(BotRun.id == run_id))
     run = result.scalars().first()
     if not run:
-        # Auto-create if not exists for simpler UX in prototype
-        run = TestRun(id=run_id, name="Auto Created")
+        # Auto-create
+        run = BotRun(id=run_id, source="manual", status="running")
         db.add(run)
         await db.commit()
     
-    event = TestRunEvent(
-        run_id=run_id,
-        role=msg_in.role,
-        content=msg_in.content
+    # 2. Log User Message
+    user_event = BotRunEvent(
+        run_id=run.id,
+        event_type="user_message",
+        payload_json={"content": msg_in.content, "role": msg_in.role}
     )
-    db.add(event)
+    db.add(user_event)
     await db.commit()
-    await db.refresh(event)
     
-    # In a real scenario, this is where we would trigger the Bot Runner?
-    # Or the frontend triggers it separately.
+    # 3. Determine Crew Version
+    version_id = msg_in.crew_version_id or run.crew_version_id 
+    # Fallback to default if not set in run (MVP: use env default if run has none)
+    if not version_id:
+         # Need to fetch default from settings or simple query
+         # We'll use a hardcoded fallback or Env if available in config object
+         # Assuming consumer settings aren't directly available here, query latest or v1
+         # For safety, let's query first available
+         v_res = await db.execute(select(BotCrewVersion).order_by(BotCrewVersion.id.desc()).limit(1))
+         v = v_res.scalars().first()
+         if v:
+             version_id = v.id
+         else:
+             # Skip execution, just echo
+             pass
     
-    return event
+    # 4. Execute Pipeline (Sync for MVP feedback in UI)
+    bot_reply_content = "No crew version available."
+    if version_id:
+        v_res = await db.execute(select(BotCrewVersion).where(BotCrewVersion.id == version_id))
+        version = v_res.scalars().one_or_none()
+        if version:
+            run.crew_version_id = version.id
+            
+            # Exec
+            bot_reply_content = await _execute_crew_local(version.snapshot_json, {"content": msg_in.content})
+    
+    # 5. Log Bot Response
+    bot_event = BotRunEvent(
+        run_id=run.id,
+        event_type="bot_message",
+        payload_json={"content": bot_reply_content, "role": "assistant"}
+    )
+    db.add(bot_event)
+    await db.commit()
+    await db.refresh(bot_event)
+    
+    return bot_event
 
 @router.get("/runs/{run_id}/events", response_model=List[TestRunEventSchema])
 async def get_run_events(
     run_id: str,
     db: AsyncSession = Depends(get_db)
 ) -> Any:
-    """Get all events for a specific test run."""
     result = await db.execute(
-        select(TestRunEvent).where(TestRunEvent.run_id == run_id).order_by(TestRunEvent.created_at)
+        select(BotRunEvent).where(BotRunEvent.run_id == run_id).order_by(BotRunEvent.timestamp)
     )
     return result.scalars().all()
+
+@router.get("/runs/{run_id}/events/stream")
+async def stream_run_events(
+    run_id: str,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    Server-Sent Events (SSE) for real-time run monitoring.
+    Polls DB for new events.
+    """
+    from fastapi.responses import StreamingResponse
+    
+    async def event_generator():
+        last_event_time = None
+        
+        # Keep connection open for a while or until run finishes
+        for _ in range(60): # Timeout after 60s of silence for MVP safety
+            # Re-query DB (fresh session best practice for streams usually, 
+            # but here reusing dependency session in loop requires care if async driver supports it.
+            # Ideally create new session per check or use long polling logic.
+            # Simplified polling using same session (ensure commit/expire)
+            
+            # Actually, `db` dependency might close if we await? 
+            # In StreamingResponse, the handler returns, so we need a text generator.
+            # We must manage our own session or assume `db` relies on request scope which is kept open?
+            # FastAPI keeps scope open until response finishes.
+            
+            query = select(BotRunEvent).where(BotRunEvent.run_id == run_id)
+            if last_event_time:
+                query = query.where(BotRunEvent.timestamp > last_event_time)
+            query = query.order_by(BotRunEvent.timestamp)
+            
+            result = await db.execute(query)
+            new_events = result.scalars().all()
+            
+            if new_events:
+                for event in new_events:
+                    # SSE format: "data: ...\n\n"
+                    # We send simple JSON
+                    data = {
+                        "id": event.id,
+                        "type": event.event_type,
+                        "payload": event.payload_json,
+                        "ts": event.timestamp.isoformat()
+                    }
+                    import json
+                    yield f"data: {json.dumps(data)}\n\n"
+                    last_event_time = event.timestamp
+            
+            await asyncio.sleep(1)
+            
+            # Check run status to stop
+            r_res = await db.execute(select(BotRun).where(BotRun.id == run_id))
+            r = r_res.scalars().first()
+            if r and r.status in ["success", "failed"]:
+                yield f"data: {{\"type\": \"status_change\", \"status\": \"{r.status}\"}}\n\n"
+                break
+                
+    return StreamingResponse(event_generator(), media_type="text/event-stream")

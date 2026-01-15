@@ -41,3 +41,8 @@ app.include_router(webhooks.router, prefix=f"{settings.API_V1_STR}/webhooks", ta
 app.include_router(admin.router, prefix=f"{settings.API_V1_STR}/admin", tags=["admin"])
 app.include_router(kb.router, prefix=f"{settings.API_V1_STR}/kb", tags=["kb"])
 app.include_router(test_lab.router, prefix=f"{settings.API_V1_STR}/testlab", tags=["test_lab"])
+app.include_router(ai.router, prefix=f"{settings.API_V1_STR}/ai", tags=["ai"])
+app.include_router(bi.router, prefix=f"{settings.API_V1_STR}/bi", tags=["bi"])
+# P2: Bot Studio Routers
+from app.api.v1.endpoints import bot_studio
+app.include_router(bot_studio.router, prefix=f"{settings.API_V1_STR}/botstudio", tags=["bot_studio"])

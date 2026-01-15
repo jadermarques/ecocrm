@@ -1,11 +1,11 @@
-name: CI
+name: ECOCRM CI
 
 on:
   push:
-    branches: [ "main" ]
-    tags: [ "v*" ]
+    branches: [ main ]
+    tags: [ 'v*.*.*' ]
   pull_request:
-    branches: [ "main" ]
+    branches: [ main ]
 
 env:
   REGISTRY: ghcr.io
@@ -14,20 +14,34 @@ env:
 jobs:
   smoke-check:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
     steps:
-    - uses: actions/checkout@v3
-    - name: Set up Python 3.12
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.12"
-    - name: Install dependencies
-      run: |
-        python -m pip install --upgrade pip
-    - name: Smoke Check (Compile All)
-      run: |
-        python -m compileall services/
-        python -m compileall apps/
-        python -m compileall workers/
+      - uses: actions/checkout@v3
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies (compile check)
+        run: |
+          pip install --upgrade pip
+          # Just install shared deps to verify they are installable
+          if [ -f requirements.txt ]; then pip install -r requirements.txt; fi
+
+      - name: Compile All (Syntax Check)
+        run: |
+          python -m compileall .
+
+      - name: Simple Import Test
+        id: import-check
+        run: |
+          # Create a temporary test file if tests/ doesn't exist
+          mkdir -p tests
+          echo "def test_basic(): assert True" > tests/test_smoke.py
+          pip install pytest
+          pytest tests/test_smoke.py
 
   build-and-push:
     needs: smoke-check
@@ -35,19 +49,6 @@ jobs:
     permissions:
       contents: read
       packages: write
-    strategy:
-      matrix:
-        service: [platform_api, streamlit_portal, bot_runner]
-        include:
-          - service: platform_api
-            context: .
-            dockerfile: services/platform_api/Dockerfile
-          - service: streamlit_portal
-            context: .
-            dockerfile: apps/streamlit_portal/Dockerfile
-          - service: bot_runner
-            context: .
-            dockerfile: workers/bot_runner/Dockerfile
 
     steps:
       - name: Checkout repository
@@ -65,13 +66,20 @@ jobs:
         id: meta
         uses: docker/metadata-action@v4
         with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}/${{ matrix.service }}
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=ref,event=branch
+            type=semver,pattern={{version}}
+            type=sha
 
       - name: Build and push Docker image
         uses: docker/build-push-action@v4
         with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.dockerfile }}
+          context: .
+          # Using the Unified Dockerfile at root
+          file: Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max

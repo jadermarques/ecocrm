@@ -92,6 +92,25 @@ services:
       redis:
         condition: service_healthy
 
+  data_hub_runner:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: python data_hub_runner/worker.py
+    platform: linux/amd64
+    env_file: .env
+    environment:
+      - DATABASE_URL=${DATABASE_URL}
+      - CHATWOOT_BASE_URL=${CHATWOOT_BASE_URL}
+      - CHATWOOT_API_TOKEN=${CHATWOOT_API_TOKEN}
+      - CHATWOOT_ACCOUNT_ID=${CHATWOOT_ACCOUNT_ID}
+    volumes:
+      - ./data_hub_runner:/app/data_hub_runner
+      - ./shared:/app/shared
+    depends_on:
+      postgres:
+        condition: service_healthy
+
 volumes:
   postgres_data:
   redis_data:

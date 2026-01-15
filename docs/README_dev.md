@@ -55,8 +55,9 @@ Diferenciamos o comportamento entre Desenvolvimento (DEV) e Produção (PROD).
 
 ## Testando Webhooks (Chatwoot)
 
-Você pode simular um evento do Chatwoot usando CURL:
+O sistema agora salva os eventos brutos no Postgres antes de processar.
 
+**Exemplo CURL:**
 ```bash
 curl -X POST "http://localhost:8000/api/v1/webhooks/chatwoot?t=SEU_TOKEN" \
      -H "Content-Type: application/json" \
@@ -66,15 +67,18 @@ curl -X POST "http://localhost:8000/api/v1/webhooks/chatwoot?t=SEU_TOKEN" \
            "account": {"id": 1},
            "data": {
              "id": 12345,
-             "content": "Olá, gostaria de saber mais sobre o ECOCRM",
+             "content": "Teste P2 Persistence",
              "inbox": {"id": 1},
              "conversation": {"id": 10},
-             "sender": {"id": 99, "name": "Jader", "phone_number": "+5511999999999"}
+             "sender": {"id": 99, "name": "Tester", "phone_number": "+5511999999999"}
            }
          }'
 ```
 
-Se tudo der certo, você verá `{"status": "processed"}` e o evento será logado no Redis.
+Se bem sucedido:
+1. Retorna `{"status": "processed", "message_id": ..., "raw_id": ...}`
+2. Insere registro na tabela `chatwoot_webhook_events_raw`.
+3. Publica no Redis `events:chatwoot`.
 
 ## Test Lab (Bot Studio)
 O Backend do Test Lab agora suporta persistência.
