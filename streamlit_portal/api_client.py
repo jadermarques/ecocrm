@@ -26,8 +26,13 @@ class APIClient:
             return False, str(e)
 
     def get_config(self):
-        resp = requests.get(f"{self.api_v1}/admin/config")
-        return self._handle_response(resp) if resp.status_code == 200 else {}
+        try:
+            resp = requests.get(f"{self.api_v1}/admin/config")
+            if resp.status_code == 200:
+                return self._handle_response(resp)
+            return {"error": f"Status: {resp.status_code} - {resp.text}"}
+        except Exception as e:
+            return {"error": str(e)}
 
     def get_logs(self):
         resp = requests.get(f"{self.api_v1}/admin/logs")

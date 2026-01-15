@@ -11,10 +11,11 @@ with tab1:
     st.header("System Configuration")
     if st.button("Fetch Config"):
         config = client.get_config()
-        if config:
+        if config and "error" not in config:
             st.json(config)
         else:
-            st.error("Failed to fetch.")
+            st.error(f"Failed to fetch: {config.get('error', 'Unknown error')}")
+            st.json(config) # Show error details
 
 with tab2:
     st.header("Users Management")
