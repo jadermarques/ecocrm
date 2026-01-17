@@ -1,7 +1,7 @@
 from datetime import datetime
 from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, Enum
 from sqlalchemy.orm import relationship
-from app.db.base import Base
+from app.db.base_class import Base
 import enum
 
 class FileStatus(str, enum.Enum):
@@ -35,6 +35,10 @@ class KBFile(Base):
     
     openai_file_id = Column(String, nullable=True) # Metadata file ID
     openai_vector_store_file_id = Column(String, nullable=True) # Link ID in VS
+    
+    # Local storage fields (when not using OpenAI)
+    local_file_path = Column(String, nullable=True) # Path to file in /app/data/kb_files/
+    file_content = Column(Text, nullable=True) # Text content extracted (for search)
     
     status = Column(Enum(FileStatus), default=FileStatus.in_progress)
     usage_bytes = Column(Integer, nullable=True)

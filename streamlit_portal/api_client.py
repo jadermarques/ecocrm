@@ -42,6 +42,19 @@ class APIClient:
         resp = requests.get(f"{self.api_v1}/admin/users")
         return self._handle_response(resp) if resp.status_code == 200 else []
 
+    def create_user(self, user_data):
+        """
+        Create a new user via the /auth/register endpoint
+        
+        Args:
+            user_data: dict with keys: email, password, full_name, role, is_superuser
+        """
+        resp = requests.post(f"{self.api_v1}/auth/register", json=user_data)
+        if resp.status_code == 200:
+            return self._handle_response(resp)
+        else:
+            return {"error": self._handle_response(resp).get("detail", "Failed to create user")}
+
     # --- Bot Studio ---
     # Agents
     def list_agents(self):
@@ -50,6 +63,10 @@ class APIClient:
 
     def create_agent(self, data):
         resp = requests.post(f"{self.api_v1}/botstudio/agents", json=data)
+        return self._handle_response(resp)
+
+    def update_agent(self, agent_id, data):
+        resp = requests.put(f"{self.api_v1}/botstudio/agents/{agent_id}", json=data)
         return self._handle_response(resp)
 
     def delete_agent(self, agent_id):
@@ -77,13 +94,35 @@ class APIClient:
 
     def create_kb(self, name, description):
         resp = requests.post(f"{self.api_v1}/kb", json={"name": name, "description": description})
-        return self._handle_response(resp)
+        if resp.status_code in [200, 201]:
+            return self._handle_response(resp)
+        else:
+            return {"error": f"Failed to create KB: {resp.status_code} - {resp.text}"}
 
     def get_kb(self, kb_id):
         resp = requests.get(f"{self.api_v1}/kb/{kb_id}")
         return self._handle_response(resp) if resp.status_code == 200 else None
 
-    # Replaces old upload_document logic which was generic
+    def update_kb(self, kb_id, name, description):
+        resp = requests.put(f"{self.api_v1}/kb/{kb_id}", json={"name": name, "description": description})
+        if resp.status_code == 200:
+            return self._handle_response(resp)
+        else:
+            return {"error": f"Failed to update KB: {resp.status_code} - {resp.text}"}
+
+    def delete_kb(self, kb_id):
+        resp = requests.delete(f"{self.api_v1}/kb/{kb_id}")
+        return resp.status_code == 200
+
+    # Replaces old upload_document logic which was generic, now specific to KB
+    def upload_document(self, _file_obj):
+        """Backwards compatibility for generic upload - assumes default KB or similar handling"""
+        # For now, just return error or try to upload to a default 'general' KB if desired.
+        # Given the error is blocking RAG, we can mock it or point to a default.
+        # Better: Since kb_rag.py might be old code, let's see how it uses it.
+        # But to fix the crash:
+        return {"error": "Please select a specific Knowledge Base to upload to."}
+
     def upload_kb_file(self, kb_id, file_obj):
         # file_obj is Streamlit UploadedFile
         files = {"file": (file_obj.name, file_obj.getvalue(), file_obj.type)}
@@ -154,6 +193,10 @@ class APIClient:
         resp = requests.post(f"{self.api_v1}/botstudio/tasks", json=data)
         return self._handle_response(resp)
 
+    def update_task(self, task_id, data):
+        resp = requests.put(f"{self.api_v1}/botstudio/tasks/{task_id}", json=data)
+        return self._handle_response(resp)
+
     def delete_task(self, task_id):
         resp = requests.delete(f"{self.api_v1}/botstudio/tasks/{task_id}")
         return resp.status_code == 200
@@ -167,17 +210,39 @@ class APIClient:
 
     def get_crew(self, crew_id):
         resp = requests.get(f"{self.api_v1}/botstudio/crews/{crew_id}")
-        return self._handle_response(resp) if resp.status_code == 200 else None
+        if resp.status_code == 200:
+            return self._handle_response(resp)
+        else:
+            st.error(f"Error loading crew {crew_id}: {resp.status_code} - {resp.text}")
+            return None
 
     def create_crew(self, data):
         resp = requests.post(f"{self.api_v1}/botstudio/crews", json=data)
         return self._handle_response(resp)
+
+    def update_crew(self, crew_id, data):
+        resp = requests.put(f"{self.api_v1}/botstudio/crews/{crew_id}", json=data)
+        return self._handle_response(resp)
+
+    def delete_crew(self, crew_id):
+        resp = requests.delete(f"{self.api_v1}/botstudio/crews/{crew_id}")
+        return resp.status_code == 200
 
     def send_message(self, run_id, content, role="user", crew_version_id=None):
         payload = {"content": content, "role": role}
         if crew_version_id:
             payload["crew_version_id"] = crew_version_id
         resp = requests.post(f"{self.api_v1}/testlab/runs/{run_id}/messages", json=payload)
+        return self._handle_response(resp)
+
+    def create_run(self, run_id, name, run_type="Manual"):
+        # Map frontend args to backend schema
+        payload = {
+            "id": run_id,
+            "source": run_type
+            # 'name' is not stored in backend BotRun model currently
+        }
+        resp = requests.post(f"{self.api_v1}/testlab/runs", json=payload)
         return self._handle_response(resp)
 
     def get_run(self, run_id):

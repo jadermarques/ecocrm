@@ -26,6 +26,7 @@ pages = {
     ],
     "System": [
         st.Page("pages/admin.py", title="Administration", icon="⚙️"),
+        st.Page("pages/user_management.py", title="User Management", icon="👥"),
     ]
 }
 

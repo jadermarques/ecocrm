@@ -24,6 +24,22 @@ async def list_agents(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(BotAgent).order_by(BotAgent.id))
     return result.scalars().all()
 
+@router.put("/agents/{agent_id}", response_model=schemas.BotAgent)
+async def update_agent(agent_id: int, agent_update: schemas.BotAgentUpdate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(BotAgent).where(BotAgent.id == agent_id))
+    db_agent = result.scalar_one_or_none()
+    
+    if not db_agent:
+        raise HTTPException(status_code=404, detail="Agent not found")
+        
+    update_data = agent_update.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_agent, key, value)
+        
+    await db.commit()
+    await db.refresh(db_agent)
+    return db_agent
+
 @router.delete("/agents/{agent_id}")
 async def delete_agent(agent_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(BotAgent).where(BotAgent.id == agent_id))
@@ -54,6 +70,28 @@ async def list_tasks(db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(BotTask).order_by(BotTask.id))
     return result.scalars().all()
 
+@router.put("/tasks/{task_id}", response_model=schemas.BotTask)
+async def update_task(task_id: int, task_update: schemas.BotTaskUpdate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(BotTask).where(BotTask.id == task_id))
+    db_task = result.scalar_one_or_none()
+    
+    if not db_task:
+        raise HTTPException(status_code=404, detail="Task not found")
+        
+    # Verify agent exists if provided
+    if task_update.agent_id is not None:
+        agent_res = await db.execute(select(BotAgent).where(BotAgent.id == task_update.agent_id))
+        if not agent_res.scalar_one_or_none():
+             raise HTTPException(status_code=400, detail="Invalid Agent ID")
+
+    update_data = task_update.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_task, key, value)
+        
+    await db.commit()
+    await db.refresh(db_task)
+    return db_task
+
 @router.delete("/tasks/{task_id}")
 async def delete_task(task_id: int, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(BotTask).where(BotTask.id == task_id))
@@ -71,7 +109,50 @@ async def create_crew(crew: schemas.BotCrewCreate, db: AsyncSession = Depends(ge
     db.add(db_crew)
     await db.commit()
     await db.refresh(db_crew)
+    await db.refresh(db_crew)
     return db_crew
+
+@router.get("/crews", response_model=List[schemas.BotCrew])
+async def list_crews(db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(BotCrew).order_by(BotCrew.id))
+    return result.scalars().all()
+
+@router.put("/crews/{crew_id}", response_model=schemas.BotCrew)
+async def update_crew(crew_id: int, crew_update: schemas.BotCrewUpdate, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(BotCrew).where(BotCrew.id == crew_id))
+    db_crew = result.scalar_one_or_none()
+    
+    if not db_crew:
+        raise HTTPException(status_code=404, detail="Crew not found")
+        
+    update_data = crew_update.dict(exclude_unset=True)
+    for key, value in update_data.items():
+        setattr(db_crew, key, value)
+        
+    await db.commit()
+    await db.refresh(db_crew)
+    await db.refresh(db_crew)
+    return db_crew
+
+@router.delete("/crews/{crew_id}")
+async def delete_crew(crew_id: int, db: AsyncSession = Depends(get_db)):
+    result = await db.execute(select(BotCrew).where(BotCrew.id == crew_id))
+    crew = result.scalar_one_or_none()
+    if not crew:
+        raise HTTPException(status_code=404, detail="Crew not found")
+        
+    # Check if we should delete tasks or just links?
+    # For now just delete crew, which cascades to links if configured or needs manual link deletion
+    # We manually delete links first
+    from sqlalchemy import delete
+    await db.execute(delete(BotCrewTaskLink).where(BotCrewTaskLink.crew_id == crew_id))
+    
+    # Also delete versions?
+    await db.execute(delete(BotCrewVersion).where(BotCrewVersion.crew_id == crew_id))
+    
+    await db.delete(crew)
+    await db.commit()
+    return {"status": "deleted"}
 
 @router.post("/crews/{crew_id}/tasks")
 async def link_tasks_to_crew(crew_id: int, links: List[schemas.TaskLinkCreate], db: AsyncSession = Depends(get_db)):
@@ -122,8 +203,11 @@ async def get_crew(crew_id: int, db: AsyncSession = Depends(get_db)):
     sorted_links = sorted(crew.task_links, key=lambda l: l.step_order)
     
     # Construct response object manual expansion
-    response = schemas.BotCrewDetail.from_orm(crew)
-    response.tasks = [link.task for link in sorted_links]
+    # Use model_validate for Pydantic V2 compat
+    response = schemas.BotCrewDetail.model_validate(crew)
+    
+    # Convert SQLAlchemy objects to Pydantic models explicitly
+    response.tasks = [schemas.BotTask.model_validate(link.task) for link in sorted_links]
     
     return response
 
@@ -169,7 +253,11 @@ async def publish_crew(
             "name": task.name,
             "description": task.description,
             "expected_output": task.expected_output,
-            "agent_id": agent.id if agent else None
+            "agent_id": agent.id if agent else None,
+            "async_execution": task.async_execution,
+            "context_task_ids": task.context_task_ids,
+            "tools": task.tools_json,
+            # capture other potential fields if added to model later
         }
         tasks_snapshot.append(task_data)
         
@@ -179,7 +267,16 @@ async def publish_crew(
                 "name": agent.name,
                 "role": agent.role,
                 "goal": agent.goal,
-                "tools": agent.tools_json
+                "backstory": agent.backstory,
+                "tools": agent.tools_json,
+                "llm": agent.llm,
+                "function_calling_llm": agent.function_calling_llm,
+                "allow_delegation": agent.allow_delegation,
+                "verbose": agent.verbose,
+                "max_iter": agent.max_iter,
+                "max_rpm": agent.max_rpm,
+                "max_execution_time": agent.max_execution_time,
+                "knowledge_sources": agent.knowledge_sources
             })
             seen_agents.add(agent.id)
             
@@ -188,6 +285,13 @@ async def publish_crew(
             "id": crew.id,
             "name": crew.name,
             "process": crew.process,
+            "manager_llm": crew.manager_llm,
+            "function_calling_llm": crew.function_calling_llm,
+            "verbose": crew.verbose,
+            "max_rpm": crew.max_rpm,
+            "manager_agent_id": crew.manager_agent_id,
+            "memory_enabled": crew.memory_enabled,
+            "config": crew.config_json,
             "model_id": model_id # Saved in snapshot
         },
         "tasks": tasks_snapshot,

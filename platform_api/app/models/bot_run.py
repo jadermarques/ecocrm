@@ -3,7 +3,7 @@ import uuid
 from sqlalchemy import Column, String, DateTime, ForeignKey, Text
 from sqlalchemy.dialects.postgresql import UUID, JSONB
 from sqlalchemy.orm import relationship
-from app.db.base import Base
+from app.db.base_class import Base
 
 class BotRun(Base):
     __tablename__ = "bot_runs"

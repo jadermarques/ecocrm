@@ -1,7 +1,7 @@
 from datetime import datetime
 from sqlalchemy import Column, String, Integer, Boolean, Numeric, Text, ForeignKey, DateTime
 from sqlalchemy.orm import relationship
-from app.db.base import Base
+from app.db.base_class import Base
 
 class AiProvider(Base):
     __tablename__ = "ai_providers"

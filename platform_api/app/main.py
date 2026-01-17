@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 import logging
 from app.core.config import settings
 from app.core.logging import setup_logging
-from app.api.v1.endpoints import auth, webhooks, admin, kb, test_lab
+from app.api.v1.endpoints import auth, webhooks, admin, kb, test_lab, ai, bi
 from app.db.session import engine
 from app.db.base import Base
 

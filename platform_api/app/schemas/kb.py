@@ -24,6 +24,15 @@ class KnowledgeBaseBase(BaseModel):
 class KnowledgeBaseCreate(KnowledgeBaseBase):
     pass
 
+class KnowledgeBaseSimple(KnowledgeBaseBase):
+    """KB without files - for create/update responses to avoid lazy loading issues"""
+    id: int
+    openai_vector_store_id: Optional[str]
+    strategy: Optional[str] = "local"
+    created_at: datetime
+    class Config:
+        from_attributes = True
+
 class KnowledgeBase(KnowledgeBaseBase):
     id: int
     openai_vector_store_id: Optional[str]

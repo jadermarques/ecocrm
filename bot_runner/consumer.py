@@ -138,8 +138,20 @@ async def process_message(message_id: str, payload: dict, redis_utils: RedisStre
                 # Retrieve snapshot
                 snapshot = version.snapshot_json
                 
-                # EXECUTE
-                final_answer = await execute_crew_logic(snapshot, {"content": content})
+                # EXECUTE (Using Shared Lib)
+                # Ensure we handle the potentially complex snapshot dict correctly
+                from shared.libs.crew_execution import execute_crew_from_snapshot
+                
+                # The snapshot might need to have defaults filled if they were created before the fix
+                # But our shared lib handles .get() safely.
+                
+                exec_result = await execute_crew_from_snapshot(
+                    snapshot, 
+                    {"content": content},
+                    version_tag=version.version_tag
+                )
+                
+                final_answer = exec_result.get("response", "No response")
                 
                 # Update Run Success
                 bot_run.status = "success"

@@ -1,7 +1,7 @@
 from datetime import datetime
 from sqlalchemy import Column, String, Integer, DateTime, Boolean, Text, BigInteger
 from sqlalchemy.dialects.postgresql import JSONB
-from app.db.base import Base
+from app.db.base_class import Base
 
 class RawChatwootEvent(Base):
     """

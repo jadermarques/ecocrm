@@ -1,4 +1,4 @@
-from typing import Any, List
+from typing import Any, List, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
@@ -15,10 +15,16 @@ from app.core.config import settings
 router = APIRouter()
 
 # Helper (Should be shared but implemented here for speed/MVP as per strict separation usually desired)
-async def _execute_crew_local(snapshot: dict, inputs: dict) -> str:
-    # Stub execution
-    await asyncio.sleep(1)
-    return f"Test Lab Reply: Filtered '{inputs.get('content')}' via {snapshot.get('crew', {}).get('name')}"
+import logging
+import json
+from pathlib import Path
+from langchain.callbacks.base import BaseCallbackHandler
+from typing import Optional
+
+from shared.libs.crew_execution import execute_crew_from_snapshot
+
+# AGENT Templates and logging handlers moved to shared.libs.crew_execution to share with bot_runner
+
 
 @router.post("/runs", response_model=TestRunSchema)
 async def create_test_run(
@@ -106,6 +112,8 @@ async def add_message(
     
     # 4. Execute Pipeline (Sync for MVP feedback in UI)
     bot_reply_content = "No crew version available."
+    agent_name = "Sistema"
+    
     if version_id:
         v_res = await db.execute(select(BotCrewVersion).where(BotCrewVersion.id == version_id))
         version = v_res.scalars().one_or_none()
@@ -113,13 +121,28 @@ async def add_message(
             run.crew_version_id = version.id
             
             # Exec
-            bot_reply_content = await _execute_crew_local(version.snapshot_json, {"content": msg_in.content})
+            result_dict = await execute_crew_from_snapshot(
+                version.snapshot_json, 
+                {"content": msg_in.content},
+                version_tag=version.version_tag
+            )
+            
+            if isinstance(result_dict, dict):
+                bot_reply_content = result_dict.get("response", str(result_dict))
+                agent_name = result_dict.get("agent_name", "Agente")
+            else:
+                bot_reply_content = str(result_dict)
+                agent_name = "Agente"
     
-    # 5. Log Bot Response
+    # 5. Log Bot Response with agent name
     bot_event = BotRunEvent(
         run_id=run.id,
         event_type="bot_message",
-        payload_json={"content": bot_reply_content, "role": "assistant"}
+        payload_json={
+            "content": bot_reply_content, 
+            "role": "assistant",
+            "agent_name": agent_name
+        }
     )
     db.add(bot_event)
     await db.commit()
@@ -150,19 +173,11 @@ async def stream_run_events(
     
     async def event_generator():
         last_event_time = None
+        import json
         
         # Keep connection open for a while or until run finishes
-        for _ in range(60): # Timeout after 60s of silence for MVP safety
-            # Re-query DB (fresh session best practice for streams usually, 
-            # but here reusing dependency session in loop requires care if async driver supports it.
-            # Ideally create new session per check or use long polling logic.
-            # Simplified polling using same session (ensure commit/expire)
-            
-            # Actually, `db` dependency might close if we await? 
-            # In StreamingResponse, the handler returns, so we need a text generator.
-            # We must manage our own session or assume `db` relies on request scope which is kept open?
-            # FastAPI keeps scope open until response finishes.
-            
+        for _ in range(60): 
+            # Check for new events
             query = select(BotRunEvent).where(BotRunEvent.run_id == run_id)
             if last_event_time:
                 query = query.where(BotRunEvent.timestamp > last_event_time)
@@ -171,23 +186,19 @@ async def stream_run_events(
             result = await db.execute(query)
             new_events = result.scalars().all()
             
-            if new_events:
-                for event in new_events:
-                    # SSE format: "data: ...\n\n"
-                    # We send simple JSON
-                    data = {
-                        "id": event.id,
-                        "type": event.event_type,
-                        "payload": event.payload_json,
-                        "ts": event.timestamp.isoformat()
-                    }
-                    import json
-                    yield f"data: {json.dumps(data)}\n\n"
-                    last_event_time = event.timestamp
+            for event in new_events:
+                data = {
+                    "id": event.id,
+                    "type": event.event_type,
+                    "payload": event.payload_json,
+                    "ts": event.timestamp.isoformat()
+                }
+                yield f"data: {json.dumps(data)}\n\n"
+                last_event_time = event.timestamp
             
             await asyncio.sleep(1)
             
-            # Check run status to stop
+            # Check run status
             r_res = await db.execute(select(BotRun).where(BotRun.id == run_id))
             r = r_res.scalars().first()
             if r and r.status in ["success", "failed"]:

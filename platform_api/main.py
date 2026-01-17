@@ -1,12 +1,11 @@
-from fastapi import FastAPI
+import sys
 import os
 
-app = FastAPI(title="ECOCRM Platform API")
+# Add the current directory (platform_api) to sys.path so that 'app' can be imported as a module
+# This allows 'from app.main import app' to work and resolves internal imports like 'from app.core...'
+current_dir = os.path.dirname(os.path.abspath(__file__))
+if current_dir not in sys.path:
+    sys.path.insert(0, current_dir)
 
-@app.get("/")
-def read_root():
-    return {"message": "Welcome to ECOCRM Platform API"}
-
-@app.get("/health")
-def health_check():
-    return {"status": "ok", "env": os.getenv("APP_ENV")}
+# Import the real FastAPI app
+from app.main import app
